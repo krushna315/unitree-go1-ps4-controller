@@ -199,13 +199,27 @@ journalctl -u unitree_go1_ps4.service -b -f -a --no-pager
 
 ## 🔬 Technical Insights: Reverse-Engineering `Legged_sport`
 
-During the development of this teleoperation system, we disassembled and reverse-engineered the official Go1 motion controller binary (`Legged_sport`) to diagnose two critical issues:
+During the development of this teleoperation system, we disassembled and reverse-engineered the official Go1 motion controller binary (`Legged_sport`) to diagnose two critical locomotion issues:
 
 ### 1. Why STAIR Mode Drifts (and How Closed-Loop Heading Hold Fixes It)
-- Disassembly of `ConvexMPCLocomotionStairs::setupCommand` (`0x000ea500` - `0x000ea750`) revealed that the firmware computes target yaw at every tick from the instantaneous IMU reading:
-  $$\text{target\_yaw} = \text{live\_yaw} + v_{yaw} \cdot \Delta t$$
-- When traversing stairs, physical disturbances (step edge impacts, body pitch tilt, compliance variation) induce small lateral forces. Because the firmware has no memory of the initial heading setpoint, this produces an open-loop drift of up to $-0.11\text{ m/s}$.
-- **Solution**: Our controller implements an active outer-loop heading lock. When forward/backward stair motion is commanded without manual steering, the initial heading $\psi_0$ is latched. The controller calculates the shortest angular difference $\Delta\psi$ in $[-\pi, \pi]$ and injects a proportional yaw rate $v_{yaw} = K_p \cdot \Delta\psi$ ($K_p = 1.20$, clamped to $\pm 0.35\text{ rad/s}$), keeping the robot tracking perfectly straight.
+
+- **Firmware Open-Loop Target Yaw Calculation**:
+  Disassembly of `ConvexMPCLocomotionStairs::setupCommand` (`0x000ea500` - `0x000ea750`) revealed that the firmware computes target yaw at every 20 ms cycle directly from the instantaneous IMU reading:
+
+  $$\text{target\_yaw} = \text{live\_yaw} + v_{\text{yaw}} \cdot \Delta t$$
+
+- **The Drift Cause**:
+  When ascending or descending stairs, physical step edge impacts, pitch inclination, and leg compliance introduce minor lateral forces. Because the firmware recalculates `target_yaw` from the current IMU angle on every tick rather than maintaining a fixed heading setpoint, the robot accumulates an open-loop drift of up to `-0.11 m/s`.
+
+- **Closed-Loop Heading Hold Solution**:
+  Our controller implements an active outer-loop heading lock at 50 Hz:
+  - When moving forward or backward on stairs without manual steering, the initial heading setpoint $\psi_0$ is latched.
+  - The controller calculates the shortest angular error wrapped in $[-\pi, \pi]$:
+
+    $$\Delta\psi = \text{atan2}(\sin(\psi_0 - \psi_{\text{live}}), \cos(\psi_0 - \psi_{\text{live}}))$$
+
+  - It injects a proportional corrective yaw rate ($v_{\text{yaw}} = K_p \cdot \Delta\psi$, with $K_p = 1.20$, clamped to $\pm 0.35\text{ rad/s}$), keeping the robot tracking in a straight line.
+  - Manual steering input on Right Stick X takes instant priority and resets the target heading setpoint.
 
 ### 2. Why Mid-Motion Stumbling Occurred
 - When stopping on stairs, cutting directly to `Mode 1` (Force Stand) aborted the Convex MPC crawl cycle mid-stride, freezing swinging legs in mid-air.
