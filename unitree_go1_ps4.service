@@ -1,0 +1,16 @@
+[Unit]
+Description=Unitree Go1 Air PS4 DualShock 4 Controller Teleoperation Service
+After=network.target bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Unitree/ps4_controller
+ExecStart=/usr/bin/python3 /home/pi/Unitree/ps4_controller/unitree_go1_ps4_controller.py
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
